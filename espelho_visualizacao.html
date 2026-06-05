@@ -98,18 +98,18 @@ td.debit{color:var(--bad);font-weight:700;text-align:center}
     <span>Arquivo: <strong id="source-name"></strong></span>
     <span>Aba: <strong id="sheet-name"></strong></span>
     <span>Linhas: <strong id="row-count"></strong></span>
-    <span>Gerado: <strong id="generated-at"></strong></span>
+    <span style="background:#14b8a6;color:#0f172a;padding:2px 10px;border-radius:10px;font-weight:700">Última atualização: <strong id="generated-at"></strong></span>
   </div>
 </header>
 <section class="toolbar">
   <div class="filter-field"><label>Buscar</label><input id="search" type="search" placeholder="Pesquisar" style="width:180px"/></div>
-  <div class="filter-field"><label>Banco</label><select id="bank-filter" style="width:90px"></select></div>
+  <div class="filter-field" style="display:none"><label>Banco</label><select id="bank-filter"></select></div>
   <div class="filter-field"><label>Historico</label><input id="history-filter" type="text" placeholder="Texto" style="width:120px"/></div>
   <div class="filter-field"><label>CNPJ/CPF</label><input id="document-filter" type="text" placeholder="Doc" style="width:110px"/></div>
   <div class="filter-field"><label>Data ini</label><input id="date-from" type="date" style="width:130px"/></div>
   <div class="filter-field"><label>Data fim</label><input id="date-to" type="date" style="width:130px"/></div>
-  <div class="filter-field"><label>Val min</label><input id="value-min" type="number" step="0.01" placeholder="0" style="width:90px"/></div>
-  <div class="filter-field"><label>Val max</label><input id="value-max" type="number" step="0.01" placeholder="0" style="width:90px"/></div>
+  <div class="filter-field"><label>Val min</label><input id="value-min" type="text" inputmode="numeric" class="money-mask" placeholder="R$ 0,00" style="width:110px"/></div>
+  <div class="filter-field"><label>Val max</label><input id="value-max" type="text" inputmode="numeric" class="money-mask" placeholder="R$ 0,00" style="width:110px"/></div>
   <div class="filter-field"><label>Tipo</label>
     <select id="type-filter" style="width:80px"><option value="">Todos</option>
       <option value="C">Credito</option><option value="D">Debito</option></select></div>
@@ -118,6 +118,10 @@ td.debit{color:var(--bad);font-weight:700;text-align:center}
     <button id="export-excel">Excel</button>
     <button class="secondary" id="print-page">Imprimir</button>
   </div>
+</section>
+<section class="quick-filters">
+  <span class="section-label">Bancos (clique p/ alternar):</span>
+  <div id="bank-buttons" style="display:flex;flex-wrap:wrap;gap:6px"></div>
 </section>
 <section class="quick-filters">
   <span class="section-label">Empresas (clique p/ alternar):</span>
@@ -131,7 +135,7 @@ td.debit{color:var(--bad);font-weight:700;text-align:center}
   <div class="separator"></div>
   <div style="display:flex;align-items:center;gap:4px">
     <label style="color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase">Valor unico:</label>
-    <input id="valor-unico" type="text" placeholder="Ex: 1.500,00" style="width:120px"/>
+    <input id="valor-unico" type="text" inputmode="numeric" class="money-mask" placeholder="R$ 0,00" style="width:140px"/>
   </div>
 </section>
 <section class="summary">
@@ -168,7 +172,7 @@ var parseBrNumber = function(v){var t=String(v||"").replace(/[^\d,.-]/g,"");retu
 var formatBr = function(n){return n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})};
 var toIsoDate = function(v){var m=String(v||"").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);return m?m[3]+"-"+m[2]+"-"+m[1]:""};
 var findColumn = function(){var args=[].slice.call(arguments);var w=args.map(normalize);return payload.columns.findIndex(function(c){return w.indexOf(normalize(c.header))>=0})};
-var ci = {company:findColumn("EMPRESA"),bank:findColumn("COD BANCO"),history:findColumn("HISTORICO"),
+var ci = {company:findColumn("EMPRESA"),bank:findColumn("BANCO","COD BANCO","BANK"),history:findColumn("HISTORICO"),
   document:findColumn("CNPJ/CPF","DOCUMENTO"),date:findColumn("DATA BALANCETE","DATA"),
   value:findColumn("VALOR R$","VALOR"),info:findColumn("INF.","TIPO"),saldo:findColumn("SALDO")};
 
@@ -187,6 +191,7 @@ var currentPage=0;
 var pageSize=100;
 var sortCol=-1, sortDir=1;
 var selectedCompanies={}; // multi-select map
+var selectedBanks={}; // multi-select map para bancos
 
 // ===== Header e colunas =====
 var headRow=document.createElement("tr");
@@ -241,21 +246,53 @@ function buildCompanyButtons(){
 }
 buildCompanyButtons();
 
-function fillBankSelect(){
-  var s=$("bank-filter");
-  s.innerHTML='<option value="">Todos</option>';
+function buildBankButtons(){
+  var wrap=$("bank-buttons");
+  if(!wrap)return;
+  wrap.innerHTML="";
+  if(ci.bank<0){wrap.parentNode.style.display="none";return}
   var banks=Array.from(new Set(payload.rows.map(function(r){return r.cells[ci.bank]}))).filter(Boolean).sort();
-  banks.forEach(function(b){var o=document.createElement("option");o.value=b;o.textContent=b;s.appendChild(o)});
+  if(banks.length===0){wrap.parentNode.style.display="none";return}
+  var allBtn=document.createElement("button");
+  allBtn.className="company-btn all-btn active";
+  allBtn.textContent="Todos ("+banks.length+")";
+  allBtn.dataset.bank="__ALL__";
+  wrap.appendChild(allBtn);
+  banks.forEach(function(b){
+    var btn=document.createElement("button");
+    btn.className="company-btn";
+    btn.textContent=b;
+    btn.dataset.bank=b;
+    wrap.appendChild(btn);
+  });
+  wrap.addEventListener("click",function(e){
+    var b=e.target.closest(".company-btn");if(!b)return;
+    var v=b.dataset.bank;
+    if(v==="__ALL__"){
+      selectedBanks={};
+      wrap.querySelectorAll(".company-btn").forEach(function(x){x.classList.remove("active")});
+      b.classList.add("active");
+    } else {
+      if(selectedBanks[v]){delete selectedBanks[v];b.classList.remove("active")}
+      else {selectedBanks[v]=true;b.classList.add("active")}
+      var anyActive=Object.keys(selectedBanks).length>0;
+      wrap.querySelector(".all-btn").classList.toggle("active",!anyActive);
+    }
+    applyFilters();
+  });
+  // mantém hidden select sincronizado para evitar quebrar lógica externa
+  var s=$("bank-filter");
+  if(s){s.innerHTML='<option value="">Todos</option>';banks.forEach(function(b){var o=document.createElement("option");o.value=b;o.textContent=b;s.appendChild(o)});}
 }
-fillBankSelect();
+buildBankButtons();
 
 function computeFilter(){
   var q=normalize($("search").value),
-      bank=$("bank-filter").value,
+      bankKeys=Object.keys(selectedBanks),
       hist=normalize($("history-filter").value),
       doc=normalize($("document-filter").value),
       dfrom=$("date-from").value,dto=$("date-to").value,
-      vmin=parseFloat($("value-min").value),vmax=parseFloat($("value-max").value),
+      vmin=parseBrNumber($("value-min").value),vmax=parseBrNumber($("value-max").value),
       type=$("type-filter").value,
       valorUnico=parseBrNumber($("valor-unico").value),
       exact=!isNaN(valorUnico)&&valorUnico>0,
@@ -264,7 +301,7 @@ function computeFilter(){
   for(var i=0;i<items.length;i++){
     var mi=items[i],row=mi.row,cells=row.cells;
     if(selKeys.length>0 && !selectedCompanies[cells[ci.company]])continue;
-    if(bank && cells[ci.bank]!==bank)continue;
+    if(bankKeys.length>0 && !selectedBanks[cells[ci.bank]])continue;
     if(hist && normalize(cells[ci.history]).indexOf(hist)<0)continue;
     if(doc && normalize(cells[ci.document]||"").indexOf(doc)<0)continue;
     if(dfrom && (!mi.iso || mi.iso<dfrom))continue;
@@ -404,6 +441,26 @@ $("export-excel").addEventListener("click",function(){
 });
 
 $("print-page").addEventListener("click",function(){window.print()});
+
+// === Máscara monetária BR (R$ X.XXX,XX) — aplica em todos .money-mask ===
+(function(){
+  function applyMask(el){
+    var digits=String(el.value||"").replace(/\D/g,"");
+    digits=digits.replace(/^0+/,"");
+    if(digits===""){el.value="";return}
+    while(digits.length<3)digits="0"+digits;
+    var cents=digits.slice(-2);
+    var reais=digits.slice(0,-2);
+    reais=reais.replace(/\B(?=(\d{3})+(?!\d))/g,".");
+    el.value="R$ "+reais+","+cents;
+  }
+  function bind(el){
+    el.addEventListener("input",function(){applyMask(el);el.dispatchEvent(new Event("change-money"))});
+    el.addEventListener("blur",function(){applyMask(el)});
+    el.addEventListener("focus",function(){setTimeout(function(){el.setSelectionRange(el.value.length,el.value.length)},0)});
+  }
+  document.querySelectorAll(".money-mask").forEach(bind);
+})();
 
 applyFilters();
 </script>
